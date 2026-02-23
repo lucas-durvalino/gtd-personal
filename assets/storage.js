@@ -1,5 +1,14 @@
 const STORAGE_KEY = "gtd-personal-v1";
 
+function normalizeMilestone(milestone) {
+  return {
+    ...milestone,
+    plannedDate: milestone.plannedDate || null,
+    completedDate: milestone.completedDate || null,
+    checklist: Array.isArray(milestone.checklist) ? milestone.checklist : [],
+  };
+}
+
 function defaultState() {
   return {
     tasks: [],
@@ -17,6 +26,7 @@ export function loadState() {
     return {
       ...defaultState(),
       ...parsed,
+      milestones: Array.isArray(parsed.milestones) ? parsed.milestones.map(normalizeMilestone) : [],
       ui: { ...defaultState().ui, ...(parsed.ui || {}) },
     };
   } catch {
@@ -43,7 +53,7 @@ export function importBackup(raw) {
   return {
     tasks: parsed.tasks,
     projects: parsed.projects,
-    milestones: parsed.milestones,
+    milestones: parsed.milestones.map(normalizeMilestone),
     ui: { activeTab: "agenda", gtdSubtab: "next", selectedProjectId: "" },
   };
 }

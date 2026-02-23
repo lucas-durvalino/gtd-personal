@@ -84,7 +84,7 @@ export function createMilestone(data = {}) {
     id: createId(),
     projectId: data.projectId || "",
     name: data.name?.trim() || "",
-    plannedDate: data.plannedDate || "",
+
     status: data.status || MILESTONE_STATUS.NOT_STARTED,
     checklist: Array.isArray(data.checklist) ? data.checklist : [],
     notes: data.notes || "",

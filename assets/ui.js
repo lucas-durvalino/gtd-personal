@@ -29,6 +29,7 @@ const GTD_SUBTABS = [
 export function createUI({ state, setState, save, exportJson, importJson, resetAll }) {
   const app = document.getElementById("app");
   const tabs = document.getElementById("main-tabs");
+  let editingMilestoneId = "";
 
   function notify(text, type = "ok") {
     const msg = document.createElement("div");
@@ -80,7 +81,14 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
       .filter((m) => m.plannedDate)
       .map((m) => {
         const project = state.projects.find((p) => p.id === m.projectId);
-        return { type: "milestone", id: m.id, title: `${m.name} (${project?.name || "Projeto"})`, date: m.plannedDate, extra: m.status };
+        return {
+          type: "milestone",
+          id: m.id,
+          title: `${m.name} (${project?.name || "Projeto"})`,
+          date: m.plannedDate,
+          extra: m.status === MILESTONE_STATUS.DONE ? "Concluído" : m.status,
+          done: m.status === MILESTONE_STATUS.DONE,
+        };
       });
 
     const items = [...tasks, ...milestones].sort((a, b) => sortByDate(a, b, "date"));
@@ -104,7 +112,7 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
     const sectionHtml = (title, arr) => `
       <section class="card">
         <h3>${title}</h3>
-        ${arr.length ? `<ul>${arr.map((i) => `<li><strong>${i.date}</strong> — ${i.title} <span class="muted">${i.extra}</span></li>`).join("")}</ul>` : "<p class='muted'>Sem itens.</p>"}
+        ${arr.length ? `<ul>${arr.map((i) => `<li class="${i.done ? "is-done" : ""}"><strong>${i.date}</strong> — ${i.title} <span class="muted">${i.extra}</span></li>`).join("")}</ul>` : "<p class='muted'>Sem itens.</p>"}
       </section>
     `;
 
@@ -385,24 +393,43 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
         <h3>Marcos</h3>
         <button id="add-ms">Adicionar marco</button>
         <ul>
-          ${milestones.map((m) => `
-            <li>
-              <div>
-                <strong>${m.name}</strong> <span class="muted">${m.plannedDate || "sem data"} • ${m.status}</span>
-                <div class="muted">${m.notes || ""}</div>
-                <ul>
-                ${(m.checklist || []).map((c) => `<li>
-                  <label><input type="checkbox" data-check="${m.id}:${c.id}" ${c.done ? "checked" : ""}/> ${c.text}</label>
-                  <button data-rm-check="${m.id}:${c.id}" class="danger">x</button>
-                </li>`).join("")}
-                </ul>
+          ${milestones.map((m) => {
+            const plannedText = m.plannedDate || "Sem data";
+            const completedText = m.completedDate ? `Concluído em: ${m.completedDate}` : "";
+            const editing = editingMilestoneId === m.id;
+            return `
+            <li class="milestone-item">
+              <div class="milestone">
+                <div class="milestone-main">
+                  ${editing ? `
+                    <label>Nome<input id="ms-name-${m.id}" value="${m.name}" /></label>
+                    <label>Data planejada<input id="ms-date-${m.id}" type="date" value="${m.plannedDate || ""}" /></label>
+                    <div class="actions">
+                      <button data-ms-save="${m.id}">Salvar</button>
+                      <button data-ms-cancel="${m.id}">Cancelar</button>
+                    </div>
+                  ` : `
+                    <strong>${m.name}</strong>
+                    <div class="muted">Planejado: ${plannedText}</div>
+                    ${completedText ? `<div class="muted">${completedText}</div>` : ""}
+                    <div class="muted">Status: ${m.status}</div>
+                  `}
+                  <div class="muted">${m.notes || ""}</div>
+                  <ul>
+                  ${(m.checklist || []).map((c) => `<li>
+                    <label><input type="checkbox" data-check="${m.id}:${c.id}" ${c.done ? "checked" : ""}/> ${c.text}</label>
+                    <button data-rm-check="${m.id}:${c.id}" class="danger">x</button>
+                  </li>`).join("")}
+                  </ul>
+                </div>
+                <div class="milestone-actions">
+                  <button data-ms-done="${m.id}">Concluir marco</button>
+                  <button data-ms-edit="${m.id}">Editar</button>
+                  <button data-ms-add-check="${m.id}">Adicionar checklist</button>
+                </div>
               </div>
-              <div class="actions">
-                <button data-ms-done="${m.id}">Concluir marco</button>
-                <button data-ms-edit="${m.id}">Editar</button>
-                <button data-ms-add-check="${m.id}">Adicionar checklist</button>
-              </div>
-            </li>`).join("")}
+            </li>`;
+          }).join("")}
         </ul>
       </section>
     `;
@@ -436,22 +463,30 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
       const ms = state.milestones.find((m) => m.id === b.dataset.msDone);
       if (!ms) return;
       ms.status = MILESTONE_STATUS.DONE;
+      ms.completedDate = new Date().toISOString().slice(0, 10);
       save();
       render();
     }));
 
     app.querySelectorAll("[data-ms-edit]").forEach((b) => b.addEventListener("click", () => {
-      const ms = state.milestones.find((m) => m.id === b.dataset.msEdit);
+      editingMilestoneId = b.dataset.msEdit;
+      render();
+    }));
+
+    app.querySelectorAll("[data-ms-cancel]").forEach((b) => b.addEventListener("click", () => {
+      editingMilestoneId = "";
+      render();
+    }));
+
+    app.querySelectorAll("[data-ms-save]").forEach((b) => b.addEventListener("click", () => {
+      const ms = state.milestones.find((m) => m.id === b.dataset.msSave);
       if (!ms) return;
-      const name = prompt("Nome do marco", ms.name);
-      if (name === null) return;
-      const plannedDate = prompt("Data planejada (YYYY-MM-DD, opcional)", ms.plannedDate || "");
-      if (plannedDate === null) return;
-      const notes = prompt("Notas/links", ms.notes || "");
-      if (notes === null) return;
-      ms.name = name.trim() || ms.name;
+      const name = document.getElementById(`ms-name-${ms.id}`)?.value.trim();
+      const plannedDate = document.getElementById(`ms-date-${ms.id}`)?.value || null;
+      if (!name) return notify("Informe o nome do marco.", "warn");
+      ms.name = name;
       ms.plannedDate = plannedDate;
-      ms.notes = notes;
+      editingMilestoneId = "";
       save();
       render();
     }));
