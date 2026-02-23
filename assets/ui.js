@@ -56,6 +56,28 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
+  function toDateOnly(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function todayStr() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function daysDiff(dateStr, baseDateStr = todayStr()) {
+    const date = parseDate(dateStr);
+    const baseDate = parseDate(baseDateStr);
+    if (!date || !baseDate) return 0;
+    const diffMs = toDateOnly(date).getTime() - toDateOnly(baseDate).getTime();
+    return Math.round(diffMs / (1000 * 60 * 60 * 24));
+  }
+
+  function formatDelta(dateStr) {
+    const diff = daysDiff(dateStr);
+    if (diff >= 0) return `em ${diff} dias`;
+    return `atrasado ${Math.abs(diff)} dias`;
+  }
+
   function sortByDate(a, b, field) {
     const da = parseDate(a[field]);
     const db = parseDate(b[field]);
@@ -75,7 +97,14 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
 
     const tasks = state.tasks
       .filter((t) => t.dueDate && ![LIST_TYPES.INBOX, LIST_TYPES.DONE, LIST_TYPES.REFERENCE].includes(t.listType))
-      .map((t) => ({ type: "task", id: t.id, title: t.title, date: t.dueDate, extra: t.context || "Tarefa" }));
+      .map((t) => ({
+        type: "task",
+        id: t.id,
+        title: t.title,
+        date: t.dueDate,
+        extra: t.context || "Tarefa",
+        badge: "TAREFA",
+      }));
 
     const milestones = state.milestones
       .filter((m) => m.plannedDate)
@@ -84,10 +113,14 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
         return {
           type: "milestone",
           id: m.id,
-          title: `${m.name} (${project?.name || "Projeto"})`,
+          title: `[${project?.name || "Projeto"}] — ${m.name}`,
           date: m.plannedDate,
-          extra: m.status === MILESTONE_STATUS.DONE ? "Concluído" : m.status,
+          extra: m.status === MILESTONE_STATUS.DONE
+            ? (m.completedDate ? `Concluído em ${m.completedDate}` : "Concluído")
+            : (daysDiff(m.plannedDate) < 0 ? `Atrasado ${Math.abs(daysDiff(m.plannedDate))} dias` : m.status),
           done: m.status === MILESTONE_STATUS.DONE,
+          overdue: m.status !== MILESTONE_STATUS.DONE && daysDiff(m.plannedDate) < 0,
+          badge: "MARCO",
         };
       });
 
@@ -112,7 +145,7 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
     const sectionHtml = (title, arr) => `
       <section class="card">
         <h3>${title}</h3>
-        ${arr.length ? `<ul>${arr.map((i) => `<li class="${i.done ? "is-done" : ""}"><strong>${i.date}</strong> — ${i.title} <span class="muted">${i.extra}</span></li>`).join("")}</ul>` : "<p class='muted'>Sem itens.</p>"}
+        ${arr.length ? `<ul>${arr.map((i) => `<li class="${i.done ? "is-done" : ""} ${i.overdue ? "is-overdue" : ""}"><span class="badge">${i.badge || "ITEM"}</span> <strong>${i.date}</strong> — ${i.title} <span class="muted">${i.extra}</span></li>`).join("")}</ul>` : "<p class='muted'>Sem itens.</p>"}
       </section>
     `;
 
@@ -287,7 +320,7 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
     const pending = state.milestones
       .filter((m) => m.projectId === projectId && m.status !== MILESTONE_STATUS.DONE)
       .sort((a, b) => sortByDate(a, b, "plannedDate"));
-    return pending[0] || null;
+    return pending.find((m) => m.plannedDate) || null;
   }
 
   function renderGtd() {
@@ -373,11 +406,17 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
     const milestones = state.milestones
       .filter((m) => m.projectId === projectId)
       .sort((a, b) => sortByDate(a, b, "plannedDate"));
+    const nextMilestone = getNextMilestone(projectId);
+    const totalMilestones = milestones.length;
+    const doneMilestones = milestones.filter((m) => m.status === MILESTONE_STATUS.DONE).length;
+    const pendingMilestones = totalMilestones - doneMilestones;
 
     app.innerHTML = `
       <section class="card">
         <button id="back-projects">← Voltar</button>
         <h2>Projeto</h2>
+        <p class="muted">Próximo marco: ${nextMilestone ? `${nextMilestone.name} • ${nextMilestone.plannedDate} • ${formatDelta(nextMilestone.plannedDate)}` : "sem data"}</p>
+        <p class="muted">Marcos: total ${totalMilestones} • concluídos ${doneMilestones} • pendentes ${pendingMilestones}</p>
         <label>Nome<input id="p-name" value="${project.name}" /></label>
         <label>Cliente (opcional)<input id="p-client" value="${project.client || ""}" /></label>
         <label>Descrição (opcional)<textarea id="p-desc">${project.description || ""}</textarea></label>
@@ -530,11 +569,11 @@ export function createUI({ state, setState, save, exportJson, importJson, resetA
         <button id="new-project">Novo projeto</button>
         <ul>
           ${state.projects.map((p) => {
-            const next = p.status === PROJECT_STATUS.ACTIVE ? getNextMilestone(p.id) : null;
+            const next = getNextMilestone(p.id);
             return `<li>
               <div>
                 <strong>${p.name}</strong>
-                <div class="muted">${p.status} • Próximo marco: ${next ? `${next.name} (${next.plannedDate || "sem data"})` : "—"}</div>
+                <div class="muted">${p.status} • Próximo marco: ${next ? `${next.name} • ${next.plannedDate} • ${formatDelta(next.plannedDate)}` : "sem data"}</div>
               </div>
               <div class="actions">
                 <button data-open-project="${p.id}">Abrir</button>
